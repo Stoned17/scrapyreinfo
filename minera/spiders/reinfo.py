@@ -27,6 +27,13 @@ class ReinfoSpider(scrapy.Spider):
         #'CLOSESPIDER_PAGECOUNT': 5,
         'DOWNLOAD_DELAY': 1.5,
         #'LOG_ENABLED': False,
+        'FEEDS': {
+            'items.json': {
+            'format': 'json',
+            'encoding': 'utf8',
+            'indent': 4,
+            },
+        },
     }
 
     def parse(self, response):
@@ -37,7 +44,7 @@ class ReinfoSpider(scrapy.Spider):
         
         
         #yield {'hola': 'hola'}
-        for row in rows[:2]:
+        for row in rows:
             id_minero = row.xpath('./td[2]/span/text()').get()
             ruc = row.xpath('./td[3]/span/text()').get()
             min_inf = row.xpath('./td[4]/span/text()').get()
@@ -65,6 +72,7 @@ class ReinfoSpider(scrapy.Spider):
             data = json.dumps(data, indent=4)
             
             printf(data)
+            #link = response.xpath('')
         #printf(rows)
         #printf(ruc)
         
@@ -77,7 +85,7 @@ class ReinfoSpider(scrapy.Spider):
 
 
 
-'''if __name__ == '__main__':
+if __name__ == '__main__':
     crawler = CrawlerProcess()
     crawler.crawl(ReinfoSpider)
-    crawler.start()'''
+    crawler.start()
