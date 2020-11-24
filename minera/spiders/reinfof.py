@@ -3,46 +3,57 @@ from scrapy import FormRequest
  
 from dotenv import load_dotenv, find_dotenv
 from pathlib import Path
-import os
+import os, datetime
 
 
 load_dotenv(find_dotenv())
 
-def printf(d = ''):
-    print('\n')
-    print('*' * 20)
-    print('*' * 20)
-    print(d)
-    print('*' * 20)
-    print('*' * 20)
-    print('\n')
 
-test_envar = os.getenv('testito')
+class ReinfofSpider(scrapy.Spider):
+    export_file_name = os.getenv('EXPORT_FILE')
+    file_name = 'reinfo{:%d%m%y-%H%M%S}.'.format(datetime.datetime.now())
 
-printf(test_envar)
+    export_format = [
+        {},
+        {
+            f'{file_name}json': {
+                'format': 'json',
+                'encoding': 'utf8',
+                'indent': 4,
+            },
+        },
+        {
+            f'{file_name}csv': {
+                'format': 'csv',
+            },
+        },
+    ]
 
-class ExampleSpider(scrapy.Spider):
+    qty_items = int(os.getenv('QTY_ITEMS'))
+    counter = 1
+    current_page = int(os.getenv('CURRENT_PAGE')) - 1
+    qty_pages = os.getenv('QTY_PAGES')
+    ruc_number = os.getenv('RUC_NUMBER')
+    nom_minero = os.getenv('NOMBRE_MINERO')
+    tipo_person = os.getenv('TIPO_PERSONA')
+    cod_derecho = os.getenv('COD_DERECHO')
+    nom_derecho = os.getenv('NOM_DERECHO')
+    departamento = os.getenv('DEPARTAMENTO')
+    order_by = os.getenv('ORDER_BY')
+    order_type = os.getenv('ORDER_TYPE')
+
+
     name = 'reinfof'
  
     start_urls = ['http://pad.minem.gob.pe/REINFO_WEB/Index.aspx']
     
     custom_settings = {
         'USER_AGENT': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.132 Safari/537.36',
-        #'CLOSESPIDER_PAGECOUNT': 5,
         'DOWNLOAD_DELAY': 1.5,
         #'LOG_ENABLED': False,
-        'FEEDS': {
-            'reinfo.json': {
-            'format': 'json',
-            'encoding': 'utf8',
-            'indent': 4,
-            },
-        },
+        'FEEDS': export_format[int(export_file_name)]
     }
     
-    qty_items = int(os.getenv('QTY_ITEMS'))
-    counter = 1
-    initial_page = int(os.getenv('INITIAL_PAGE')) - 1
     
  
     def parse(self, response):
@@ -50,7 +61,10 @@ class ExampleSpider(scrapy.Spider):
             "//input[@name='__VIEWSTATE']/@value").get()
         generator = response.xpath(
             "//input[@name='__VIEWSTATEGENERATOR']/@value").get()
- 
+        qty_rows = response.xpath(
+            "//span[@id='lbltotal']/text()").get()
+        qty_pages = response.xpath('//input[@id="txttotal"]/@value').get()
+
         yield FormRequest.from_response(
             response,
             formdata={
@@ -61,24 +75,23 @@ class ExampleSpider(scrapy.Spider):
                 '__VIEWSTATE': view_state,
                 '__VIEWSTATEGENERATOR': generator,
                 '__VIEWSTATEENCRYPTED': '',
-                'txtpagina': str(self.initial_page),
-                'txttotal': '3555',
-                'txtruc': '',
-                'txtdeclarante': '',
-                'ddltipersona': '',
-                'txtidunidad': '',
-                'txtnomderecho': '',
-                'ddldepartamento': '99',
-                'ddlordenado': '1',
-                'ddlforma': 'ASC',
+                'txtpagina': str(self.current_page),
+                'txttotal': qty_pages,
+                'txtruc': self.ruc_number,
+                'txtdeclarante': self.nom_minero,
+                'ddltipersona': self.tipo_person,
+                'txtidunidad': self.cod_derecho,
+                'txtnomderecho': self.nom_derecho,
+                'ddldepartamento': self.departamento,
+                'ddlprovincia': '99',
+                'ddlordenado': self.order_by,
+                'ddlforma': self.order_type,
                 'ImgBtnSiguiente.x': '3',
                 'ImgBtnSiguiente.y': '16'
             },
  
             meta={
-                'current_page': self.initial_page,
-                'view_state': view_state,
-                'generator': generator
+                'current_page': self.current_page,
             },
  
             callback=self.parse_data
@@ -86,18 +99,34 @@ class ExampleSpider(scrapy.Spider):
  
     def parse_data(self, response):
         
-        # pagination
+        # PAGINACION
         current_page = response.meta['current_page']
-        view_state  = response.meta['view_state']
-        generator  = response.meta['generator']
-        
+
+        view_state = response.xpath(
+            "//input[@name='__VIEWSTATE']/@value").get()
+        generator = response.xpath(
+            "//input[@name='__VIEWSTATEGENERATOR']/@value").get()
+        qty_rows = response.xpath(
+            "//span[@id='lbltotal']/text()").get()
+        qty_pages = response.xpath('//input[@id="txttotal"]/@value').get()
+
+        if int(qty_pages) < current_page:
+            return
+
+        if self.qty_pages:
+            if int(int(self.qty_pages) + self.current_page) == current_page:
+                    return
+
         for row in response.xpath("(//table)[2]//tr[position() > 3]"):
             
             # CANTIDAD
-            if self.qty_items < self.counter:
-                return
+            if not self.qty_pages and self.qty_items <= int(qty_rows):
+                if self.qty_items < self.counter:
+                    return
+            else:
+                self.qty_items = int(qty_rows)
             self.counter += 1
-            
+
             yield {
                 'ID': row.xpath(".//td[2]/span/text()").get(),
                 'RUC': row.xpath(".//td[3]/span/text()").get(),
@@ -108,13 +137,9 @@ class ExampleSpider(scrapy.Spider):
                 'PROVINCIA': row.xpath(".//td[8]/span/text()").get(),
                 'DISTRITO': row.xpath(".//td[9]/span/text()").get(), 
             }
- 
-        next_page = current_page + 1
-        
-        '''if next_page == 2:
-            return 'Ya van 2 páginas se acabó el payaso.'
-            '''
-        
+
+        current_page = current_page + 1
+
         yield FormRequest.from_response(
             response,
             formdata={
@@ -125,24 +150,22 @@ class ExampleSpider(scrapy.Spider):
                 '__VIEWSTATE': view_state,
                 '__VIEWSTATEGENERATOR': generator,
                 '__VIEWSTATEENCRYPTED': '',
-                'txtpagina': str(next_page),
-                'txttotal': '3555',
-                'txtruc': '',
-                'txtdeclarante': '',
-                'ddltipersona': '',
-                'txtidunidad': '',
-                'txtnomderecho': '',
-                'ddldepartamento': '99',
-                'ddlordenado': '1',
-                'ddlforma': 'ASC',
+                'txtpagina': str(current_page),
+                'txttotal': qty_pages,
+                'txtruc': self.ruc_number,
+                'txtdeclarante': self.nom_minero,
+                'ddltipersona': self.tipo_person,
+                'txtidunidad': self.cod_derecho,
+                'txtnomderecho': self.nom_derecho,
+                'ddldepartamento': self.departamento,
+                'ddlordenado': self.order_by,
+                'ddlforma': self.order_type,
                 'ImgBtnSiguiente.x': '3',
                 'ImgBtnSiguiente.y': '16'
             },
  
             meta={
-                'current_page': next_page,
-                'view_state': view_state,
-                'generator': generator
+                'current_page': current_page,
             },
  
             callback=self.parse_data
